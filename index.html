@@ -69,7 +69,7 @@
     // Определение API URL для главной страницы
     const API_URL = window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost"
         ? "http://127.0.0.1:10000" 
-        : "https://energomarket-e1k3.onrender.com";
+        : window.location.origin;
 
     document.addEventListener('DOMContentLoaded', () => {
         const user = localStorage.getItem('currentUser');
