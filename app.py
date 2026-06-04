@@ -1,14 +1,26 @@
 import sqlite3
-import os # Добавили для порта
+import os  # Добавили для работы с путями и портами
 from flask import send_from_directory, Flask, jsonify, request
 from flask_cors import CORS
 
 app = Flask(__name__)
 CORS(app)
 
+# --- УМНОЕ ОПРЕДЕЛЕНИЕ ПУТИ К БАЗЕ ДАННЫХ ---
+# Если мы на Render, пишем на постоянный диск /data/, если локально — в текущую папку
+if os.environ.get('RENDER'):
+    DB_PATH = '/data/database.db'
+else:
+    DB_PATH = 'database.db'
+
 # Инициализация базы данных
 def init_db():
-    conn = sqlite3.connect('database.db')
+    # Если папки /data/ еще нет (на Render), создаем её
+    db_dir = os.path.dirname(DB_PATH)
+    if db_dir and not os.path.exists(db_dir):
+        os.makedirs(db_dir)
+
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
     cursor.execute('''
@@ -50,14 +62,14 @@ def index():
 def serve_static(path):
     return send_from_directory('.', path)
 
-# НОВЫЙ МАРШРУТ: Пополнение баланса (для тестов)
+# Пополнение баланса (для тестов)
 @app.route('/add_money', methods=['POST'])
 def add_money():
     data = request.json
     username = data.get('username')
-    amount = data.get('amount', 5000) # По умолчанию 5000
+    amount = data.get('amount', 5000)
 
-    conn = sqlite3.connect('database.db')
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("UPDATE users SET balance = balance + ? WHERE username = ?", (amount, username))
     conn.commit()
@@ -71,7 +83,7 @@ def buy():
     price = data.get('price')
     item_name = data.get('itemName')
 
-    conn = sqlite3.connect('database.db')
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
     cursor.execute("SELECT balance FROM users WHERE username=?", (username,))
@@ -95,21 +107,18 @@ def get_profile():
     if not username:
         return jsonify({"error": "Юзер не указан"}), 400
 
-    conn = sqlite3.connect('database.db')
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
-    # Ищем баланс
     cursor.execute("SELECT balance FROM users WHERE username=?", (username,))
     row = cursor.fetchone()
     
-    # Если юзер не найден в БД, возвращаем ошибку, а не просто 0
     if row is None:
         conn.close()
         return jsonify({"error": "Пользователь не найден"}), 404
 
     balance = row[0]
     
-    # Тянем историю
     cursor.execute("SELECT item_name, price, date FROM orders WHERE username=? ORDER BY date DESC", (username,))
     orders = [{"name": r[0], "price": r[1], "date": r[2]} for r in cursor.fetchall()]
     
@@ -119,17 +128,15 @@ def get_profile():
         "orders": orders
     })
 
-
 @app.route('/register', methods=['POST'])
 def register():
     data = request.json
     username = data.get('username')
     password = data.get('password')
     
-    conn = sqlite3.connect('database.db')
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     try:
-        # Установили начальный баланс 20 000
         cursor.execute("INSERT INTO users (username, password, balance) VALUES (?, ?, ?)", (username, password, 20000.0))
         conn.commit()
         return jsonify({"message": "Success"}), 201
@@ -144,7 +151,7 @@ def login():
     username = data.get('username')
     password = data.get('password')
     
-    conn = sqlite3.connect('database.db')
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM users WHERE username=? AND password=?", (username, password))
     user = cursor.fetchone()
@@ -157,6 +164,5 @@ def login():
 
 if __name__ == '__main__':
     init_db()
-    # Адаптивный порт для Render
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
