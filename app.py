@@ -1,11 +1,14 @@
 import os
 import psycopg2
-import traceback  # Добавили для вывода подробных ошибок в логи
+import traceback
 from flask import send_from_directory, Flask, jsonify, request
 from flask_cors import CORS
 
 app = Flask(__name__)
 CORS(app)
+
+# Флаг, чтобы не проверять базу данных при каждом запросе
+db_initialized = False
 
 # --- ПОДКЛЮЧЕНИЕ К POSTGRESQL ---
 raw_url = os.environ.get('DATABASE_URL')
@@ -24,9 +27,8 @@ def get_db_connection():
         import sqlite3
         return sqlite3.connect('database.db')
 
-# Инициализация таблиц с выводом ошибок в консоль Render
+# Инициализация таблиц
 def init_db():
-    print("=== Инициализация базы данных... ===")
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -62,10 +64,18 @@ def init_db():
         conn.commit()
         cursor.close()
         conn.close()
-        print("=== База данных успешно инициализирована! ===")
+        print("=== База данных успешно проверена и готова! ===")
     except Exception as e:
-        print("!!! ОШИБКА ПРИ ИНИЦИАЛИЗАЦИИ БАЗЫ ДАННЫХ !!!")
-        print(traceback.format_exc())  # Это выведет полную ошибку в логи Render
+        print("!!! ОШИБКА ИНИЦИАЛИЗАЦИИ БАЗЫ ДАННЫХ !!!")
+        print(traceback.format_exc())
+
+# Этот хук запустится автоматически перед самым первым запросом к сайту
+@app.before_request
+def safe_init():
+    global db_initialized
+    if not db_initialized:
+        init_db()
+        db_initialized = True
 
 @app.route('/')
 def index():
@@ -193,6 +203,5 @@ def login():
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
-    init_db()
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
