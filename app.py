@@ -1,31 +1,34 @@
-import sqlite3
-import os  # Добавили для работы с путями и портами
+import os
+import psycopg2
 from flask import send_from_directory, Flask, jsonify, request
 from flask_cors import CORS
 
 app = Flask(__name__)
 CORS(app)
 
-# --- УМНОЕ ОПРЕДЕЛЕНИЕ ПУТИ К БАЗЕ ДАННЫХ ---
-# Если мы на Render, пишем на постоянный диск /data/, если локально — в текущую папку
-if os.environ.get('RENDER'):
-    DB_PATH = '/data/database.db'
-else:
-    DB_PATH = 'database.db'
+# --- ПОДКЛЮЧЕНИЕ К POSTGRESQL ---
+# Если мы на Render, берём URL из настроек. Если локально — используем SQLite для тестов
+DATABASE_URL = os.environ.get('DATABASE_URL')
 
-# Инициализация базы данных
+def get_db_connection():
+    if DATABASE_URL:
+        # Подключение к Postgres на Render
+        conn = psycopg2.connect(DATABASE_URL)
+    else:
+        # Резервное локальное подключение к SQLite, если запускаешь дома
+        import sqlite3
+        conn = sqlite3.connect('database.db')
+    return conn
+
+# Инициализация таблиц в Postgres
 def init_db():
-    # Если папки /data/ еще нет (на Render), создаем её
-    db_dir = os.path.dirname(DB_PATH)
-    if db_dir and not os.path.exists(db_dir):
-        os.makedirs(db_dir)
-
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     cursor = conn.cursor()
     
+    # Синтаксис Postgres немного отличается (вместо AUTOINCREMENT используется SERIAL)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             username TEXT UNIQUE NOT NULL,
             password TEXT NOT NULL,
             balance REAL DEFAULT 20000.0
@@ -34,7 +37,7 @@ def init_db():
     
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS orders (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             username TEXT NOT NULL,
             item_name TEXT NOT NULL,
             price REAL NOT NULL,
@@ -44,7 +47,7 @@ def init_db():
     
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS favorites (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             username TEXT NOT NULL,
             item_id INTEGER NOT NULL,
             UNIQUE(username, item_id)
@@ -52,6 +55,7 @@ def init_db():
     ''')
     
     conn.commit()
+    cursor.close()
     conn.close()
 
 @app.route('/')
@@ -62,17 +66,17 @@ def index():
 def serve_static(path):
     return send_from_directory('.', path)
 
-# Пополнение баланса (для тестов)
 @app.route('/add_money', methods=['POST'])
 def add_money():
     data = request.json
     username = data.get('username')
     amount = data.get('amount', 5000)
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("UPDATE users SET balance = balance + ? WHERE username = ?", (amount, username))
+    cursor.execute("UPDATE users SET balance = balance + %s WHERE username = %s", (amount, username))
     conn.commit()
+    cursor.close()
     conn.close()
     return jsonify({"success": True, "message": f"Баланс {username} пополнен!"})
 
@@ -83,21 +87,23 @@ def buy():
     price = data.get('price')
     item_name = data.get('itemName')
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     cursor = conn.cursor()
     
-    cursor.execute("SELECT balance FROM users WHERE username=?", (username,))
+    cursor.execute("SELECT balance FROM users WHERE username=%s", (username,))
     user_row = cursor.fetchone()
 
     if user_row and user_row[0] >= price:
         new_balance = user_row[0] - price
-        cursor.execute("UPDATE users SET balance=? WHERE username=?", (new_balance, username))
-        cursor.execute("INSERT INTO orders (username, item_name, price) VALUES (?, ?, ?)", 
+        cursor.execute("UPDATE users SET balance=%s WHERE username=%s", (new_balance, username))
+        cursor.execute("INSERT INTO orders (username, item_name, price) VALUES (%s, %s, %s)", 
                        (username, item_name, price))
         conn.commit()
+        cursor.close()
         conn.close()
         return jsonify({"success": True, "new_balance": new_balance})
     else:
+        cursor.close()
         conn.close()
         return jsonify({"error": "Недостаточно средств на балансе или ошибка авторизации"}), 400
 
@@ -107,21 +113,23 @@ def get_profile():
     if not username:
         return jsonify({"error": "Юзер не указан"}), 400
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     cursor = conn.cursor()
     
-    cursor.execute("SELECT balance FROM users WHERE username=?", (username,))
+    cursor.execute("SELECT balance FROM users WHERE username=%s", (username,))
     row = cursor.fetchone()
     
     if row is None:
+        cursor.close()
         conn.close()
         return jsonify({"error": "Пользователь не найден"}), 404
 
     balance = row[0]
     
-    cursor.execute("SELECT item_name, price, date FROM orders WHERE username=? ORDER BY date DESC", (username,))
+    cursor.execute("SELECT item_name, price, date FROM orders WHERE username=%s ORDER BY date DESC", (username,))
     orders = [{"name": r[0], "price": r[1], "date": r[2]} for r in cursor.fetchall()]
     
+    cursor.close()
     conn.close()
     return jsonify({
         "balance": float(balance),
@@ -134,15 +142,16 @@ def register():
     username = data.get('username')
     password = data.get('password')
     
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        cursor.execute("INSERT INTO users (username, password, balance) VALUES (?, ?, ?)", (username, password, 20000.0))
+        cursor.execute("INSERT INTO users (username, password, balance) VALUES (%s, %s, %s)", (username, password, 20000.0))
         conn.commit()
         return jsonify({"message": "Success"}), 201
-    except:
-        return jsonify({"error": "Пользователь уже существует"}), 400
+    except Exception as e:
+        return jsonify({"error": "Пользователь уже существует или ошибка БД"}), 400
     finally:
+        cursor.close()
         conn.close()
 
 @app.route('/login', methods=['POST'])
@@ -151,10 +160,11 @@ def login():
     username = data.get('username')
     password = data.get('password')
     
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM users WHERE username=? AND password=?", (username, password))
+    cursor.execute("SELECT * FROM users WHERE username=%s AND password=%s", (username, password))
     user = cursor.fetchone()
+    cursor.close()
     conn.close()
     
     if user:
