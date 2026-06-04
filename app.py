@@ -10,6 +10,10 @@ CORS(app)
 # Если мы на Render, берём URL из настроек. Если локально — используем SQLite для тестов
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
+if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
+    # Автоматически переделываем postgres:// в postgresql:// для совместимости с psycopg2
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
 def get_db_connection():
     if DATABASE_URL:
         # Подключение к Postgres на Render
@@ -25,7 +29,7 @@ def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # Синтаксис Postgres немного отличается (вместо AUTOINCREMENT используется SERIAL)
+    # Синтаксис Postgres (вместо AUTOINCREMENT используется SERIAL)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             id SERIAL PRIMARY KEY,
