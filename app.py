@@ -33,18 +33,26 @@ def init_db():
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        cursor.execute('''
+        # Проверяем, какая база используется (в psycopg2 есть метод cursor.execute, а у sqlite3 немного другой синтаксис, но TEXT и REAL они понимают одинаково)
+        # Для SQLite SERIAL превращается в INTEGER PRIMARY KEY
+        is_sqlite = 'sqlite3' in str(type(conn))
+        
+        id_user_type = "INTEGER PRIMARY KEY AUTOINCREMENT" if is_sqlite else "SERIAL PRIMARY KEY"
+        id_order_type = "INTEGER PRIMARY KEY AUTOINCREMENT" if is_sqlite else "SERIAL PRIMARY KEY"
+        id_fav_type = "INTEGER PRIMARY KEY AUTOINCREMENT" if is_sqlite else "SERIAL PRIMARY KEY"
+
+        cursor.execute(f'''
             CREATE TABLE IF NOT EXISTS users (
-                id SERIAL PRIMARY KEY,
+                id {id_user_type},
                 username TEXT UNIQUE NOT NULL,
                 password TEXT NOT NULL,
                 balance REAL DEFAULT 20000.0
             )
         ''')
         
-        cursor.execute('''
+        cursor.execute(f'''
             CREATE TABLE IF NOT EXISTS orders (
-                id SERIAL PRIMARY KEY,
+                id {id_order_type},
                 username TEXT NOT NULL,
                 item_name TEXT NOT NULL,
                 price REAL NOT NULL,
@@ -52,9 +60,9 @@ def init_db():
             )
         ''')
         
-        cursor.execute('''
+        cursor.execute(f'''
             CREATE TABLE IF NOT EXISTS favorites (
-                id SERIAL PRIMARY KEY,
+                id {id_fav_type},
                 username TEXT NOT NULL,
                 item_id INTEGER NOT NULL,
                 UNIQUE(username, item_id)
@@ -64,11 +72,11 @@ def init_db():
         conn.commit()
         cursor.close()
         conn.close()
-        print("=== База данных успешно проверена и готова! ===")
+        print("=== Локальная База данных успешно готова! ===")
     except Exception as e:
         print("!!! ОШИБКА ИНИЦИАЛИЗАЦИИ БАЗЫ ДАННЫХ !!!")
         print(traceback.format_exc())
-
+        
 # Этот хук запустится автоматически перед самым первым запросом к сайту
 @app.before_request
 def safe_init():
