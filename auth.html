@@ -26,10 +26,8 @@
 
     <script>
         // АВТОМАТИЧЕСКИЙ ВЫБОР АДРЕСА СЕРВЕРА
-        const API_URL = window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost"
-            ? "http://127.0.0.1:10000" 
-            : window.location.origin;
-
+        const API_URL = "https://energomarket-e1k3.onrender.com";
+           
         const authForm = document.getElementById('authForm');
         const toggleLink = document.getElementById('toggleAuth');
         const authTitle = document.getElementById('auth-title');
